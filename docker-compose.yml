@@ -1,4 +1,11 @@
 services:
+
+  # ─────────────────────────────────────────────
+  # BASE DE DATOS — PostgreSQL
+  # Los datos persisten en el volumen "pgdata".
+  # Si cambiás POSTGRES_PASSWORD acá, cambialo
+  # también en DATABASE_URL del servicio "api".
+  # ─────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     env_file: .env
@@ -10,14 +17,49 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Healthcheck: el api no arranca hasta que postgres esté listo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-llm_gateway}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # ─────────────────────────────────────────────
+  # COLA / CACHE — Redis
+  # Usado por Bull (jobs async) y rate limiting.
+  # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # ─────────────────────────────────────────────
+  # BACKEND — NestJS API
+  #
+  # El comando de startup hace 3 cosas en orden:
+  #   1. prisma generate  → genera el cliente de
+  #      Prisma a partir del schema.prisma.
+  #      Necesario siempre que cambie el schema.
+  #
+  #   2. prisma migrate deploy → aplica todas las
+  #      migraciones pendientes automáticamente.
+  #      Solo corre las que todavía no se aplicaron,
+  #      así que es seguro ejecutarlo siempre.
+  #      NO hace falta correrlo a mano nunca más.
+  #
+  #   3. start:dev → levanta NestJS con hot reload.
+  #
+  # depends_on con condition: service_healthy
+  # garantiza que DB y Redis estén listos antes
+  # de que el api intente conectarse.
+  # ─────────────────────────────────────────────
   api:
     build:
       context: ./backend
@@ -29,13 +71,28 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-llm_gateway}
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy   # espera que postgres esté listo
+      redis:
+        condition: service_healthy   # espera que redis esté listo
     volumes:
       - ./backend:/app
-      - /app/node_modules
-    command: sh -c "npx prisma generate && npm run start:dev"
+      - /app/node_modules            # evita que el volumen pise los node_modules del container
+    command: >
+      sh -c "
+        echo '→ Generando cliente Prisma...' &&
+        npx prisma generate &&
+        echo '→ Aplicando migraciones pendientes...' &&
+        npx prisma migrate deploy &&
+        echo '→ Migraciones OK. Levantando servidor...' &&
+        npm run start:dev
+      "
 
+  # ─────────────────────────────────────────────
+  # FRONTEND — Next.js
+  # Se conecta al api via NEXT_PUBLIC_API_URL.
+  # En dev apunta a localhost:3000.
+  # ─────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -52,6 +109,13 @@ services:
       - /app/node_modules
     command: npm run dev
 
+# ─────────────────────────────────────────────
+# VOLÚMENES PERSISTENTES
+# pgdata: datos de postgres (sobreviven docker-compose down)
+# redisdata: datos de redis
+# Para resetear todo desde cero:
+#   docker-compose down -v
+# ─────────────────────────────────────────────
 volumes:
   pgdata:
   redisdata:
