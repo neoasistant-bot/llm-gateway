@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  CLIENT
+}
+
+enum InputType {
+  TEXT
+  JSON_SCHEMA
+}
+
+enum Provider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+}
+
+enum ExecutionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  CREATE_USER
+  UPDATE_USER
+  DEACTIVATE_USER
+  CREATE_METHOD
+  UPDATE_METHOD
+  DEACTIVATE_METHOD
+  ASSIGN_METHOD
+  UNASSIGN_METHOD
+  UPDATE_SCHEMA
+  EXECUTE_METHOD
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CLIENT)
+  isActive     Boolean  @default(true)
+  outputSchema Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  methods    UserMethod[]
+  executions MethodExecution[]
+  auditLogs  AuditLog[]
+}
+
+model Method {
+  id             String    @id @default(uuid())
+  name           String
+  description    String?
+  inputType      InputType @default(TEXT)
+  promptTemplate String
+  provider       Provider
+  model          String
+  isPublic       Boolean   @default(false)
+  isActive       Boolean   @default(true)
+  config         Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  users      UserMethod[]
+  executions MethodExecution[]
+}
+
+model UserMethod {
+  userId               String
+  methodId             String
+  outputSchemaOverride Json?
+  isActive             Boolean @default(true)
+
+  user   User   @relation(fields: [userId], references: [id])
+  method Method @relation(fields: [methodId], references: [id])
+
+  @@id([userId, methodId])
+}
+
+model MethodExecution {
+  id           String          @id @default(uuid())
+  userId       String
+  methodId     String
+  status       ExecutionStatus @default(PENDING)
+  input        Json
+  output       Json?
+  promptSent   String?
+  provider     String?
+  model        String?
+  tokensInput  Int?
+  tokensOutput Int?
+  latencyMs    Int?
+  error        Json?
+  createdAt    DateTime        @default(now())
+  completedAt  DateTime?
+
+  user   User   @relation(fields: [userId], references: [id])
+  method Method @relation(fields: [methodId], references: [id])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  userId     String?
+  action     AuditAction
+  resource   String
+  resourceId String?
+  details    Json?
+  ip         String?
+  createdAt  DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
