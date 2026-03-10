@@ -39,7 +39,7 @@
     "@nestjs/throttler": "^6.0.0",
     "rate-limiter-flexible": "^5.0.0",
     "ioredis": "^5.0.0",
-    "@nestjs/schedule": "^4.0.0"
+    "@nestjs/schedule": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
